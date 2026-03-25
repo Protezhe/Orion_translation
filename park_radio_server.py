@@ -28,7 +28,7 @@ except ImportError:
     print("Установите: pip install python-vlc")
     sys.exit(1)
 
-from flask import Flask, jsonify, request, render_template
+from flask import Flask, jsonify, request, render_template, redirect, url_for, session
 import os
 
 # ──────────────────────────────────────────────────────────────────
@@ -47,6 +47,7 @@ DEFAULTS: dict = {
     "working_hours": {"start": "09:00", "end": "22:00"},
     "scheduled_announcements": [],
     # Формат: [{"file": "promo.mp3", "times": ["10:00", "14:30"]}]
+    "admin": {"password": "admin"},
 }
 
 # ──────────────────────────────────────────────────────────────────
@@ -625,9 +626,42 @@ class Scheduler:
 #  Flask
 # ──────────────────────────────────────────────────────────────────
 app       = Flask(__name__)
+app.secret_key = os.urandom(24)   # новый ключ при каждом перезапуске — сессии сбрасываются
 cfg       = load_config()
 player    = RadioPlayer(cfg)
 scheduler = Scheduler(player, cfg)
+
+
+# ──────────────────────────────────────────────────────────────────
+#  Авторизация
+# ──────────────────────────────────────────────────────────────────
+@app.before_request
+def check_auth():
+    allowed = {"/login", "/static"}
+    if any(request.path.startswith(p) for p in allowed):
+        return
+    if not session.get("authed"):
+        if request.path.startswith("/api/"):
+            return jsonify({"error": "Unauthorized"}), 401
+        return redirect(url_for("login"))
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    error = None
+    if request.method == "POST":
+        pwd = request.form.get("password", "")
+        if pwd == cfg.get("admin", {}).get("password", "admin"):
+            session["authed"] = True
+            return redirect(url_for("index"))
+        error = "Неверный пароль"
+    return render_template("login.html", error=error)
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
 
 
 @app.route("/")

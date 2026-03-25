@@ -319,26 +319,29 @@
     }
     .file-del-btn:hover { opacity: 1; }
     .upload-area {
-      border: 1px dashed var(--line); border-radius: 8px;
-      padding: 12px 14px; margin-bottom: 10px;
-      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      border: 2px dashed var(--line); border-radius: 10px;
+      padding: 20px 14px; margin-bottom: 10px;
+      display: flex; flex-direction: column; align-items: center; gap: 8px;
+      cursor: pointer; transition: border-color .15s, background .15s;
+      text-align: center;
     }
-    .upload-area:hover { border-color: var(--music); }
-    .upload-label {
-      display: inline-block; padding: 7px 16px; border-radius: 6px;
-      background: var(--btn); color: var(--text); font-size: 13px;
-      font-weight: 600; cursor: pointer; transition: background .15s;
+    .upload-area:hover  { border-color: var(--music); }
+    .upload-area.dragover {
+      border-color: var(--music);
+      background: rgba(79,195,247,.06);
     }
-    .upload-label:hover { background: var(--btn-h); }
-    .upload-filename { font-size: 12px; color: var(--dim); flex: 1; word-break: break-all; }
+    .upload-icon { font-size: 26px; line-height: 1; }
+    .upload-hint { font-size: 12px; color: var(--dim); }
+    .upload-hint b { color: var(--text); font-weight: 600; }
+    .upload-chosen { font-size: 12px; color: var(--music); font-weight: 600; }
     .upload-btn {
-      padding: 7px 16px; border: none; border-radius: 6px;
+      padding: 7px 20px; border: none; border-radius: 6px;
       background: var(--music); color: #000;
       font-size: 13px; font-weight: 700; cursor: pointer;
-      transition: opacity .15s; display: none;
+      transition: opacity .15s; display: none; margin-top: 2px;
     }
     .upload-btn:hover { opacity: .85; }
-    .upload-status { font-size: 12px; margin-top: 6px; display: none; }
+    .upload-status { font-size: 12px; margin-top: 4px; display: none; }
     .upload-status.ok  { color: var(--green); }
     .upload-status.err { color: var(--red); }
 
@@ -371,6 +374,7 @@
     <div class="dot" id="dot"></div>
     <h1>ПАРКОВОЕ РАДИО</h1>
     <span class="header-sched off" id="headerSched">ВЫКЛ</span>
+    <a href="/logout" style="margin-left:8px;font-size:11px;color:var(--dim);text-decoration:none;padding:2px 8px;border:1px solid var(--line);border-radius:10px;" title="Выйти">Выйти</a>
   </div>
 
   <!-- Сейчас играет (всегда видно) -->
@@ -479,12 +483,15 @@
         <div class="file-section-title">🎵 МУЗЫКА</div>
 
         <!-- Загрузка -->
-        <div class="upload-area">
-          <label class="upload-label" for="uploadMusicInput">Выбрать файл</label>
-          <input type="file" id="uploadMusicInput" accept=".mp3,.wav,.ogg,.flac,.aac,.m4a,.wma" style="display:none"
-                 onchange="onFileChosen('music')">
-          <span class="upload-filename" id="uploadMusicName">Файл не выбран</span>
-          <button class="upload-btn" id="uploadMusicBtn" onclick="doUpload('music')">Загрузить</button>
+        <div class="upload-area" id="dropMusic"
+             onclick="document.getElementById('uploadMusicInput').click()"
+             ondragover="onDragOver(event,'music')" ondragleave="onDragLeave('music')" ondrop="onDrop(event,'music')">
+          <div class="upload-icon">🎵</div>
+          <div class="upload-hint"><b>Перетащите файлы сюда</b> или кликните для выбора</div>
+          <div class="upload-chosen" id="uploadMusicName" style="display:none"></div>
+          <input type="file" id="uploadMusicInput" accept=".mp3,.wav,.ogg,.flac,.aac,.m4a,.wma"
+                 style="display:none" multiple onchange="onFileChosen('music')">
+          <button class="upload-btn" id="uploadMusicBtn" onclick="event.stopPropagation();doUpload('music')">Загрузить</button>
         </div>
         <div class="upload-status" id="uploadMusicStatus"></div>
 
@@ -496,12 +503,15 @@
       <div class="file-section">
         <div class="file-section-title">📢 ОБЪЯВЛЕНИЯ</div>
 
-        <div class="upload-area">
-          <label class="upload-label" for="uploadAnnInput">Выбрать файл</label>
-          <input type="file" id="uploadAnnInput" accept=".mp3,.wav,.ogg,.flac,.aac,.m4a,.wma" style="display:none"
-                 onchange="onFileChosen('announcements')">
-          <span class="upload-filename" id="uploadAnnName">Файл не выбран</span>
-          <button class="upload-btn" id="uploadAnnBtn" onclick="doUpload('announcements')">Загрузить</button>
+        <div class="upload-area" id="dropAnn"
+             onclick="document.getElementById('uploadAnnInput').click()"
+             ondragover="onDragOver(event,'announcements')" ondragleave="onDragLeave('announcements')" ondrop="onDrop(event,'announcements')">
+          <div class="upload-icon">📢</div>
+          <div class="upload-hint"><b>Перетащите файлы сюда</b> или кликните для выбора</div>
+          <div class="upload-chosen" id="uploadAnnName" style="display:none"></div>
+          <input type="file" id="uploadAnnInput" accept=".mp3,.wav,.ogg,.flac,.aac,.m4a,.wma"
+                 style="display:none" multiple onchange="onFileChosen('announcements')">
+          <button class="upload-btn" id="uploadAnnBtn" onclick="event.stopPropagation();doUpload('announcements')">Загрузить</button>
         </div>
         <div class="upload-status" id="uploadAnnStatus"></div>
 
@@ -921,57 +931,84 @@
     ).join('');
   }
 
-  function onFileChosen(folder) {
-    const suffix = folder === 'music' ? 'Music' : 'Ann';
-    const input  = document.getElementById('upload' + suffix + 'Input');
-    const nameEl = document.getElementById('upload' + suffix + 'Name');
-    const btn    = document.getElementById('upload' + suffix + 'Btn');
-    if (input.files[0]) {
-      nameEl.textContent = input.files[0].name;
-      btn.style.display  = '';
+  // pendingFiles: { music: FileList|Array, announcements: FileList|Array }
+  const pendingFiles = { music: [], announcements: [] };
+
+  function suffix(folder) { return folder === 'music' ? 'Music' : 'Ann'; }
+  function dropId(folder)  { return folder === 'music' ? 'dropMusic' : 'dropAnn'; }
+
+  function setChosen(folder, files) {
+    pendingFiles[folder] = files;
+    const nameEl = document.getElementById('upload' + suffix(folder) + 'Name');
+    const btn    = document.getElementById('upload' + suffix(folder) + 'Btn');
+    if (files && files.length) {
+      nameEl.textContent  = files.length === 1 ? files[0].name : `Выбрано файлов: ${files.length}`;
+      nameEl.style.display = '';
+      btn.style.display   = '';
     } else {
-      nameEl.textContent = 'Файл не выбран';
-      btn.style.display  = 'none';
+      nameEl.style.display = 'none';
+      btn.style.display    = 'none';
     }
   }
 
+  function onFileChosen(folder) {
+    const input = document.getElementById('upload' + suffix(folder) + 'Input');
+    setChosen(folder, input.files);
+  }
+
+  function onDragOver(e, folder) {
+    e.preventDefault();
+    document.getElementById(dropId(folder)).classList.add('dragover');
+  }
+  function onDragLeave(folder) {
+    document.getElementById(dropId(folder)).classList.remove('dragover');
+  }
+  function onDrop(e, folder) {
+    e.preventDefault();
+    document.getElementById(dropId(folder)).classList.remove('dragover');
+    const files = [...e.dataTransfer.files].filter(f => /\.(mp3|wav|ogg|flac|aac|m4a|wma)$/i.test(f.name));
+    if (files.length) setChosen(folder, files);
+  }
+
   async function doUpload(folder) {
-    const suffix  = folder === 'music' ? 'Music' : 'Ann';
-    const input   = document.getElementById('upload' + suffix + 'Input');
-    const statusEl = document.getElementById('upload' + suffix + 'Status');
-    const nameEl  = document.getElementById('upload' + suffix + 'Name');
-    const btn     = document.getElementById('upload' + suffix + 'Btn');
+    const files    = pendingFiles[folder];
+    const statusEl = document.getElementById('upload' + suffix(folder) + 'Status');
+    if (!files || !files.length) return;
 
-    if (!input.files[0]) return;
+    const total = files.length;
+    let done = 0, errors = [];
 
-    const form = new FormData();
-    form.append('folder', folder);
-    form.append('file', input.files[0]);
-
-    statusEl.textContent = 'Загрузка...';
-    statusEl.className   = 'upload-status ok';
+    statusEl.className    = 'upload-status ok';
     statusEl.style.display = '';
 
-    try {
-      const r = await fetch('/api/upload', {method: 'POST', body: form});
-      const d = await r.json();
-      if (r.ok) {
-        statusEl.textContent = `✓ Загружен: ${d.name}`;
-        statusEl.className   = 'upload-status ok';
-        input.value  = '';
-        nameEl.textContent = 'Файл не выбран';
-        btn.style.display  = 'none';
-        loadFiles();
-      } else {
-        statusEl.textContent = '✗ ' + (d.error || 'Ошибка');
-        statusEl.className   = 'upload-status err';
+    for (const file of files) {
+      statusEl.textContent = `Загрузка ${done + 1} / ${total}: ${file.name}`;
+      const form = new FormData();
+      form.append('folder', folder);
+      form.append('file', file);
+      try {
+        const r = await fetch('/api/upload', {method: 'POST', body: form});
+        const d = await r.json();
+        if (r.ok) { done++; }
+        else { errors.push(file.name + ': ' + (d.error || 'Ошибка')); }
+      } catch(e) {
+        errors.push(file.name + ': нет соединения');
       }
-    } catch(e) {
-      statusEl.textContent = '✗ Ошибка соединения';
+    }
+
+    loadFiles();
+    // Сбрасываем выбор
+    document.getElementById('upload' + suffix(folder) + 'Input').value = '';
+    setChosen(folder, []);
+
+    if (errors.length === 0) {
+      statusEl.textContent = `✓ Загружено файлов: ${done}`;
+      statusEl.className   = 'upload-status ok';
+    } else {
+      statusEl.textContent = `✓ ${done} загружено, ✗ ошибки: ${errors.join('; ')}`;
       statusEl.className   = 'upload-status err';
     }
-    statusEl.style.display = '';
-    setTimeout(() => { statusEl.style.display = 'none'; }, 4000);
+    setTimeout(() => { statusEl.style.display = 'none'; }, 5000);
   }
 
   async function deleteFile(folder, filename) {

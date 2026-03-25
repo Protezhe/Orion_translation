@@ -602,6 +602,9 @@ class Scheduler:
             filepath = ann_dir / fname
             if not filepath.exists():
                 continue
+            # Пропускаем выключенные объявления
+            if not ann.get("enabled", True):
+                continue
             # Проверяем день недели (пустой список = каждый день)
             days = ann.get("days", [])
             if days and today_dow not in days:
@@ -700,9 +703,10 @@ def api_scheduled_set():
         fname = str(ann.get("file", "")).strip()
         if not fname:
             continue
-        times = sorted({t for t in ann.get("times", []) if time_re.match(str(t))})
-        days  = sorted({int(d) for d in ann.get("days", []) if str(d).isdigit() and 0 <= int(d) <= 6})
-        validated.append({"file": fname, "times": times, "days": days})
+        times   = sorted({t for t in ann.get("times", []) if time_re.match(str(t))})
+        days    = sorted({int(d) for d in ann.get("days", []) if str(d).isdigit() and 0 <= int(d) <= 6})
+        enabled = bool(ann.get("enabled", True))
+        validated.append({"file": fname, "times": times, "days": days, "enabled": enabled})
 
     cfg["scheduled_announcements"] = validated
     save_config(cfg)

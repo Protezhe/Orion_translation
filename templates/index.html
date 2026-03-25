@@ -235,6 +235,14 @@
       background: rgba(255,183,77,.2); border-color: var(--ann); color: var(--ann);
     }
 
+    .toggle-btn {
+      flex-shrink: 0; border: none; border-radius: 12px;
+      padding: 3px 10px; font-size: 11px; font-weight: 700;
+      cursor: pointer; transition: all .15s; letter-spacing: .04em;
+    }
+    .toggle-btn.on  { background: rgba(102,187,106,.2); color: var(--green); }
+    .toggle-btn.off { background: rgba(90,90,136,.2);   color: var(--dim); }
+
     .next-sched {
       font-size: 12px; color: var(--dim); margin-top: 10px; padding-top: 10px;
       border-top: 1px solid var(--line);
@@ -772,14 +780,15 @@
       const r = await fetch('/api/scheduled');
       const d = await r.json();
       const newFiles = d.available_files || [];
-      newFiles.forEach(f => { if (!schedMap[f]) schedMap[f] = {times: new Set(), days: new Set()}; });
+      newFiles.forEach(f => { if (!schedMap[f]) schedMap[f] = {times: new Set(), days: new Set(), enabled: true}; });
       Object.keys(schedMap).forEach(f => { if (!newFiles.includes(f)) delete schedMap[f]; });
       availableFiles = newFiles;
       if (!schedDirty) {
         (d.announcements || []).forEach(a => {
           if (schedMap[a.file]) {
-            schedMap[a.file].times = new Set(a.times || []);
-            schedMap[a.file].days  = new Set((a.days || []).map(Number));
+            schedMap[a.file].times   = new Set(a.times || []);
+            schedMap[a.file].days    = new Set((a.days || []).map(Number));
+            schedMap[a.file].enabled = a.enabled !== false;
           }
         });
       }
@@ -801,8 +810,14 @@
       const dayBtns = DOW.map((label, i) =>
         `<button class="day-btn ${entry.days.has(i) ? 'on' : ''}" onclick="toggleDay('${fname}',${i})">${label}</button>`
       ).join('');
+      const isOn = entry.enabled !== false;
       return `<div class="ann-file">
-        <div class="ann-filename">📣 ${esc(fname)}</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <div class="ann-filename" style="margin-bottom:0;flex:1">📣 ${esc(fname)}</div>
+          <button class="toggle-btn ${isOn ? 'on' : 'off'}" onclick="toggleEnabled('${fname}')">
+            ${isOn ? 'ВКЛ' : 'ВЫКЛ'}
+          </button>
+        </div>
         <div class="days-row">${dayBtns}</div>
         <div class="time-chips" id="chips_${CSS.escape(fname)}">
           ${chips}
@@ -810,6 +825,14 @@
         </div>
       </div>`;
     }).join('');
+  }
+
+  function toggleEnabled(fname) {
+    const e = schedMap[fname];
+    if (!e) return;
+    e.enabled = e.enabled === false ? true : false;
+    schedDirty = true;
+    renderScheduled();
   }
 
   function toggleDay(fname, dow) {
@@ -852,8 +875,8 @@
   async function saveScheduled() {
     const announcements = availableFiles
       .map(f => {
-        const e = schedMap[f] || {times: new Set(), days: new Set()};
-        return {file: f, times: [...e.times].sort(), days: [...e.days].sort()};
+        const e = schedMap[f] || {times: new Set(), days: new Set(), enabled: true};
+        return {file: f, times: [...e.times].sort(), days: [...e.days].sort(), enabled: e.enabled !== false};
       })
       .filter(a => a.times.length > 0);
 

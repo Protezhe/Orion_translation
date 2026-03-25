@@ -285,6 +285,55 @@
     @keyframes bar { from{height:6px} to{height:16px} }
     .playing-bar.paused { animation: none; height: 10px; background: var(--dim); }
 
+    /* ── Файлы ── */
+    .file-section { margin-bottom: 16px; }
+    .file-section:last-child { margin-bottom: 0; }
+    .file-section-title {
+      font-size: 11px; font-weight: 700; letter-spacing: .08em;
+      color: var(--dim); margin-bottom: 8px;
+    }
+    .file-list {
+      list-style: none; max-height: 260px; overflow-y: auto;
+      scrollbar-width: thin; scrollbar-color: var(--line) transparent;
+    }
+    .file-list::-webkit-scrollbar       { width: 4px; }
+    .file-list::-webkit-scrollbar-thumb { background: var(--line); border-radius: 2px; }
+    .file-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 13px;
+    }
+    .file-item:last-child { border-bottom: none; }
+    .file-item-name { flex: 1; word-break: break-all; }
+    .file-del-btn {
+      background: none; border: none; color: var(--red);
+      font-size: 16px; cursor: pointer; padding: 0 4px;
+      opacity: .55; line-height: 1; flex-shrink: 0;
+    }
+    .file-del-btn:hover { opacity: 1; }
+    .upload-area {
+      border: 1px dashed var(--line); border-radius: 8px;
+      padding: 12px 14px; margin-bottom: 10px;
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    }
+    .upload-area:hover { border-color: var(--music); }
+    .upload-label {
+      display: inline-block; padding: 7px 16px; border-radius: 6px;
+      background: var(--btn); color: var(--text); font-size: 13px;
+      font-weight: 600; cursor: pointer; transition: background .15s;
+    }
+    .upload-label:hover { background: var(--btn-h); }
+    .upload-filename { font-size: 12px; color: var(--dim); flex: 1; word-break: break-all; }
+    .upload-btn {
+      padding: 7px 16px; border: none; border-radius: 6px;
+      background: var(--music); color: #000;
+      font-size: 13px; font-weight: 700; cursor: pointer;
+      transition: opacity .15s; display: none;
+    }
+    .upload-btn:hover { opacity: .85; }
+    .upload-status { font-size: 12px; margin-top: 6px; display: none; }
+    .upload-status.ok  { color: var(--green); }
+    .upload-status.err { color: var(--red); }
+
     /* ── Лог ── */
     .log-list {
       list-style: none; max-height: 340px; overflow-y: auto;
@@ -332,6 +381,7 @@
     <div class="tab active" onclick="showTab('main')">Управление</div>
     <div class="tab"        onclick="showTab('playlist')">Плейлист</div>
     <div class="tab"        onclick="showTab('history')">История</div>
+    <div class="tab"        onclick="showTab('files');loadFiles()">Файлы</div>
   </div>
 
   <!-- ══ Панель: Управление ══ -->
@@ -412,12 +462,53 @@
     </div>
   </div>
 
+  <!-- ══ Панель: Файлы ══ -->
+  <div class="panel" id="panel-files">
+    <div class="card">
+
+      <!-- Музыка -->
+      <div class="file-section">
+        <div class="file-section-title">🎵 МУЗЫКА</div>
+
+        <!-- Загрузка -->
+        <div class="upload-area">
+          <label class="upload-label" for="uploadMusicInput">Выбрать файл</label>
+          <input type="file" id="uploadMusicInput" accept=".mp3,.wav,.ogg,.flac,.aac,.m4a,.wma" style="display:none"
+                 onchange="onFileChosen('music')">
+          <span class="upload-filename" id="uploadMusicName">Файл не выбран</span>
+          <button class="upload-btn" id="uploadMusicBtn" onclick="doUpload('music')">Загрузить</button>
+        </div>
+        <div class="upload-status" id="uploadMusicStatus"></div>
+
+        <!-- Список -->
+        <ul class="file-list" id="musicFileList"></ul>
+      </div>
+
+      <!-- Объявления -->
+      <div class="file-section">
+        <div class="file-section-title">📢 ОБЪЯВЛЕНИЯ</div>
+
+        <div class="upload-area">
+          <label class="upload-label" for="uploadAnnInput">Выбрать файл</label>
+          <input type="file" id="uploadAnnInput" accept=".mp3,.wav,.ogg,.flac,.aac,.m4a,.wma" style="display:none"
+                 onchange="onFileChosen('announcements')">
+          <span class="upload-filename" id="uploadAnnName">Файл не выбран</span>
+          <button class="upload-btn" id="uploadAnnBtn" onclick="doUpload('announcements')">Загрузить</button>
+        </div>
+        <div class="upload-status" id="uploadAnnStatus"></div>
+
+        <ul class="file-list" id="annFileList"></ul>
+      </div>
+
+    </div>
+  </div>
+
 </div>
 <script>
   // ── Вкладки ──────────────────────────────────────────────────────
   function showTab(id) {
     document.querySelectorAll('.tab').forEach((t, i) => {
-      t.classList.toggle('active', ['main','playlist','history'][i] === id);
+      t.classList.toggle('active', ['main','playlist','history','files'][i] === id);
     });
     document.querySelectorAll('.panel').forEach(p => {
       p.classList.toggle('active', p.id === 'panel-' + id);
@@ -780,6 +871,98 @@
         + ` в <span>${d.next.time}</span> ${d.next.day} (${d.next.in})`;
     } else {
       nsEl.style.display = 'none';
+    }
+  }
+
+  // ── Файлы ────────────────────────────────────────────────────────
+  async function loadFiles() {
+    try {
+      const r = await fetch('/api/files');
+      const d = await r.json();
+      renderFileList('musicFileList', d.music, 'music');
+      renderFileList('annFileList', d.announcements, 'announcements');
+    } catch(e) {}
+  }
+
+  function renderFileList(listId, files, folder) {
+    const ul = document.getElementById(listId);
+    if (!files || !files.length) {
+      ul.innerHTML = '<li style="font-size:12px;color:var(--dim);padding:8px 0">Нет файлов</li>';
+      return;
+    }
+    ul.innerHTML = files.map(f =>
+      `<li class="file-item">
+        <span class="file-item-name">${esc(f)}</span>
+        <button class="file-del-btn" onclick="deleteFile('${folder}','${esc(f)}')" title="Удалить">×</button>
+      </li>`
+    ).join('');
+  }
+
+  function onFileChosen(folder) {
+    const suffix = folder === 'music' ? 'Music' : 'Ann';
+    const input  = document.getElementById('upload' + suffix + 'Input');
+    const nameEl = document.getElementById('upload' + suffix + 'Name');
+    const btn    = document.getElementById('upload' + suffix + 'Btn');
+    if (input.files[0]) {
+      nameEl.textContent = input.files[0].name;
+      btn.style.display  = '';
+    } else {
+      nameEl.textContent = 'Файл не выбран';
+      btn.style.display  = 'none';
+    }
+  }
+
+  async function doUpload(folder) {
+    const suffix  = folder === 'music' ? 'Music' : 'Ann';
+    const input   = document.getElementById('upload' + suffix + 'Input');
+    const statusEl = document.getElementById('upload' + suffix + 'Status');
+    const nameEl  = document.getElementById('upload' + suffix + 'Name');
+    const btn     = document.getElementById('upload' + suffix + 'Btn');
+
+    if (!input.files[0]) return;
+
+    const form = new FormData();
+    form.append('folder', folder);
+    form.append('file', input.files[0]);
+
+    statusEl.textContent = 'Загрузка...';
+    statusEl.className   = 'upload-status ok';
+    statusEl.style.display = '';
+
+    try {
+      const r = await fetch('/api/upload', {method: 'POST', body: form});
+      const d = await r.json();
+      if (r.ok) {
+        statusEl.textContent = `✓ Загружен: ${d.name}`;
+        statusEl.className   = 'upload-status ok';
+        input.value  = '';
+        nameEl.textContent = 'Файл не выбран';
+        btn.style.display  = 'none';
+        loadFiles();
+      } else {
+        statusEl.textContent = '✗ ' + (d.error || 'Ошибка');
+        statusEl.className   = 'upload-status err';
+      }
+    } catch(e) {
+      statusEl.textContent = '✗ Ошибка соединения';
+      statusEl.className   = 'upload-status err';
+    }
+    statusEl.style.display = '';
+    setTimeout(() => { statusEl.style.display = 'none'; }, 4000);
+  }
+
+  async function deleteFile(folder, filename) {
+    if (!confirm(`Удалить файл «${filename}»?`)) return;
+    try {
+      const r = await fetch(`/api/files/${folder}/${encodeURIComponent(filename)}`, {method: 'DELETE'});
+      if (r.ok) {
+        loadFiles();
+      } else {
+        const d = await r.json();
+        alert(d.error || 'Ошибка удаления');
+      }
+    } catch(e) {
+      alert('Ошибка соединения');
     }
   }
 

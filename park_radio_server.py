@@ -29,6 +29,7 @@ except ImportError:
     sys.exit(1)
 
 from flask import Flask, jsonify, request, render_template
+import os
 
 # ──────────────────────────────────────────────────────────────────
 #  Константы
@@ -726,6 +727,69 @@ def api_volume():
 
     save_config(cfg)
     return jsonify({"ok": True, "value": value})
+
+
+# ──────────────────────────────────────────────────────────────────
+#  Файловый менеджер
+# ──────────────────────────────────────────────────────────────────
+@app.route("/api/files", methods=["GET"])
+def api_files_get():
+    music_dir = BASE_DIR / cfg["music_dir"]
+    ann_dir   = BASE_DIR / cfg["announcements_dir"]
+    return jsonify({
+        "music":         [f.name for f in scan_audio(music_dir)],
+        "announcements": [f.name for f in scan_audio(ann_dir)],
+    })
+
+
+@app.route("/api/upload", methods=["POST"])
+def api_upload():
+    folder = request.form.get("folder", "").strip()
+    if folder not in ("music", "announcements"):
+        return jsonify({"error": "Неверная папка"}), 400
+
+    file = request.files.get("file")
+    if not file or not file.filename:
+        return jsonify({"error": "Файл не выбран"}), 400
+
+    # Безопасное имя файла
+    from werkzeug.utils import secure_filename
+    fname = secure_filename(file.filename)
+    if not fname:
+        return jsonify({"error": "Недопустимое имя файла"}), 400
+
+    ext = os.path.splitext(fname)[1].lower()
+    if ext not in AUDIO_EXTENSIONS:
+        return jsonify({"error": f"Формат не поддерживается: {ext}"}), 400
+
+    dest_dir = BASE_DIR / cfg[folder + "_dir"]
+    dest_dir.mkdir(exist_ok=True)
+    file.save(dest_dir / fname)
+
+    # Обновляем список файлов в плеере
+    player._rescan()
+
+    return jsonify({"ok": True, "name": fname})
+
+
+@app.route("/api/files/<folder>/<path:filename>", methods=["DELETE"])
+def api_file_delete(folder: str, filename: str):
+    if folder not in ("music", "announcements"):
+        return jsonify({"error": "Неверная папка"}), 400
+
+    target = (BASE_DIR / cfg[folder + "_dir"] / filename).resolve()
+    base   = (BASE_DIR / cfg[folder + "_dir"]).resolve()
+
+    # Защита от path traversal
+    if not str(target).startswith(str(base) + os.sep):
+        return jsonify({"error": "Недопустимый путь"}), 400
+
+    if not target.exists():
+        return jsonify({"error": "Файл не найден"}), 404
+
+    target.unlink()
+    player._rescan()
+    return jsonify({"ok": True})
 
 
 # ──────────────────────────────────────────────────────────────────

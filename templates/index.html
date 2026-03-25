@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Парковое радио</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:     #0f0f17;
+      --card:   #1a1a2e;
+      --line:   #2a2a4a;
+      --text:   #e8e8f0;
+      --dim:    #5a5a88;
+      --music:  #4fc3f7;
+      --ann:    #ffb74d;
+      --btn:    #252545;
+      --btn-h:  #353565;
+      --green:  #66bb6a;
+      --red:    #ef5350;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      padding: 16px 12px 40px;
+    }
+
+    .wrap { width: 100%; max-width: 540px; }
+
+    /* ── Шапка ── */
+    .header {
+      background: var(--card);
+      border-radius: 12px 12px 0 0;
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .header h1 { font-size: 16px; font-weight: 700; letter-spacing: .05em; }
+    .dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--green); flex-shrink: 0;
+      animation: pulse 1.6s ease-in-out infinite;
+    }
+    .dot.paused { background: var(--dim); animation: none; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.25} }
+
+    /* ── Сейчас играет (фиксированная карточка) ── */
+    .now-card {
+      background: var(--card);
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--line);
+    }
+    .type-badge {
+      font-size: 10px; font-weight: 700; letter-spacing: .08em;
+      padding: 2px 7px; border-radius: 4px;
+      display: inline-block; margin-bottom: 6px;
+    }
+    .type-music { background: rgba(79,195,247,.15); color: var(--music); }
+    .type-ann   { background: rgba(255,183,77,.15);  color: var(--ann); }
+    .track-name {
+      font-size: 18px; font-weight: 700; line-height: 1.3;
+      word-break: break-word; margin-bottom: 4px;
+    }
+    .meta-row {
+      display: flex; align-items: center; gap: 14px;
+      flex-wrap: wrap; font-size: 12px; color: var(--dim);
+    }
+    .next-ann.now { color: var(--ann); }
+
+    /* ── Вкладки ── */
+    .tabs {
+      display: flex;
+      background: var(--card);
+      border-bottom: 1px solid var(--line);
+    }
+    .tab {
+      flex: 1; padding: 10px 0;
+      text-align: center; font-size: 13px; font-weight: 600;
+      color: var(--dim); cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: color .15s, border-color .15s;
+      user-select: none;
+    }
+    .tab.active        { color: var(--text); border-color: var(--music); }
+    .tab:hover:not(.active) { color: var(--text); }
+
+    /* ── Панели ── */
+    .panel { display: none; }
+    .panel.active { display: block; }
+
+    /* ── Карточки ── */
+    .card {
+      background: var(--card);
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--line);
+    }
+    .card:last-child { border-radius: 0 0 12px 12px; border-bottom: none; }
+    .card h2 {
+      font-size: 10px; font-weight: 700; letter-spacing: .08em;
+      color: var(--dim); margin-bottom: 12px;
+    }
+
+    /* ── Громкость ── */
+    .vol-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+    .vol-row:last-child { margin-bottom: 0; }
+    .vol-label { font-size: 13px; width: 120px; flex-shrink: 0; }
+    .vol-label.music { color: var(--music); }
+    .vol-label.ann   { color: var(--ann); }
+    .vol-value { font-size: 13px; font-weight: 700; width: 36px; text-align: right; flex-shrink: 0; }
+    .vol-value.music { color: var(--music); }
+    .vol-value.ann   { color: var(--ann); }
+    input[type=range] {
+      flex: 1; -webkit-appearance: none; appearance: none;
+      height: 4px; border-radius: 2px; outline: none; cursor: pointer;
+    }
+    input[type=range].music {
+      background: linear-gradient(to right, var(--music) var(--val,70%), var(--line) var(--val,70%));
+    }
+    input[type=range].ann {
+      background: linear-gradient(to right, var(--ann) var(--val,90%), var(--line) var(--val,90%));
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 18px; height: 18px;
+      border-radius: 50%; cursor: pointer; transition: transform .1s;
+    }
+    input[type=range].music::-webkit-slider-thumb { background: var(--music); }
+    input[type=range].ann::-webkit-slider-thumb   { background: var(--ann); }
+    input[type=range]:active::-webkit-slider-thumb { transform: scale(1.25); }
+
+    /* ── Кнопки ── */
+    .controls { display: flex; gap: 10px; }
+    .btn {
+      flex: 1; padding: 11px 0; border: none; border-radius: 8px;
+      background: var(--btn); color: var(--text);
+      font-size: 14px; font-weight: 600; cursor: pointer;
+      transition: background .15s, transform .1s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .btn:hover  { background: var(--btn-h); }
+    .btn:active { transform: scale(.97); }
+    .btn.paused { color: var(--green); }
+
+    /* ── Инфо-бар ── */
+    .info-bar { font-size: 12px; color: var(--dim); text-align: center; }
+    .info-bar.warn { color: var(--red); }
+
+    /* ── Расписание ── */
+    .schedule-status {
+      display: flex; align-items: center; gap: 10px;
+      margin-bottom: 14px;
+    }
+    .sched-badge {
+      font-size: 11px; font-weight: 700; letter-spacing: .06em;
+      padding: 3px 10px; border-radius: 20px;
+    }
+    .sched-badge.on  { background: rgba(102,187,106,.2); color: var(--green); }
+    .sched-badge.off { background: rgba(90,90,136,.2);   color: var(--dim); }
+    .sched-next { font-size: 12px; color: var(--dim); }
+
+    .time-row {
+      display: flex; align-items: center; gap: 10px;
+      margin-bottom: 10px; flex-wrap: wrap;
+    }
+    .time-row label { font-size: 13px; color: var(--dim); width: 80px; }
+    input[type=time] {
+      background: var(--btn); color: var(--text);
+      border: 1px solid var(--line); border-radius: 6px;
+      padding: 6px 10px; font-size: 14px; outline: none;
+      color-scheme: dark;
+    }
+    input[type=time]:focus { border-color: var(--music); }
+    .save-btn {
+      padding: 8px 20px; border: none; border-radius: 6px;
+      background: var(--music); color: #000;
+      font-size: 13px; font-weight: 700; cursor: pointer;
+      transition: opacity .15s;
+    }
+    .save-btn:hover  { opacity: .85; }
+    .save-btn:active { opacity: .7; }
+    .sched-error { font-size: 12px; color: var(--red); margin-top: 6px; display: none; }
+
+    /* Статус расписания в шапке */
+    .header-sched {
+      margin-left: auto; font-size: 11px; font-weight: 600;
+      letter-spacing: .04em; padding: 2px 8px; border-radius: 10px;
+    }
+    .header-sched.on  { background: rgba(102,187,106,.2); color: var(--green); }
+    .header-sched.off { background: rgba(90,90,136,.2);   color: var(--dim); }
+
+    /* ── Плейлист ── */
+    .playlist {
+      list-style: none;
+      max-height: 420px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+      scrollbar-color: var(--line) transparent;
+    }
+    .playlist::-webkit-scrollbar       { width: 4px; }
+    .playlist::-webkit-scrollbar-thumb { background: var(--line); border-radius: 2px; }
+
+    .pl-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 0; border-bottom: 1px solid var(--line);
+      font-size: 13px;
+    }
+    .pl-item:last-child { border-bottom: none; }
+    .pl-num   { color: var(--dim); font-size: 11px; width: 22px; text-align: right; flex-shrink: 0; }
+    .pl-icon  { font-size: 13px; flex-shrink: 0; }
+    .pl-name  { word-break: break-word; flex: 1; }
+    .pl-item.music .pl-name { color: var(--text); }
+    .pl-item.ann   .pl-name { color: var(--ann); font-weight: 600; }
+    .pl-item.current {
+      background: rgba(79,195,247,.07);
+      border-radius: 6px; padding: 9px 8px;
+      margin: 0 -8px;
+    }
+    .pl-item.current .pl-name { color: var(--music); font-weight: 700; }
+    .playing-bar {
+      width: 3px; height: 16px; border-radius: 2px;
+      background: var(--music); flex-shrink: 0;
+      animation: bar 0.8s ease-in-out infinite alternate;
+    }
+    @keyframes bar { from{height:6px} to{height:16px} }
+    .playing-bar.paused { animation: none; height: 10px; background: var(--dim); }
+
+    /* ── Лог ── */
+    .log-list {
+      list-style: none; max-height: 340px; overflow-y: auto;
+      scrollbar-width: thin; scrollbar-color: var(--line) transparent;
+    }
+    .log-list::-webkit-scrollbar       { width: 4px; }
+    .log-list::-webkit-scrollbar-thumb { background: var(--line); border-radius: 2px; }
+    .log-item {
+      display: flex; align-items: baseline; gap: 8px;
+      padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13px;
+    }
+    .log-item:last-child { border-bottom: none; }
+    .log-icon  { flex-shrink: 0; font-size: 12px; }
+    .log-name  { flex: 1; word-break: break-word; }
+    .log-time  { color: var(--dim); font-size: 11px; flex-shrink: 0; }
+    .log-item.music .log-name { color: var(--music); }
+    .log-item.ann   .log-name { color: var(--ann); }
+    .log-item.err   .log-name { color: var(--red); }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- Шапка -->
+  <div class="header">
+    <div class="dot" id="dot"></div>
+    <h1>ПАРКОВОЕ РАДИО</h1>
+    <span class="header-sched off" id="headerSched">ВЫКЛ</span>
+  </div>
+
+  <!-- Сейчас играет (всегда видно) -->
+  <div class="now-card">
+    <div class="type-badge type-music" id="typeBadge">МУЗЫКА</div>
+    <div class="track-name" id="trackName">Загрузка...</div>
+    <div class="meta-row">
+      <span id="elapsed">0:00</span>
+      <span id="duration" style="color:var(--dim)"></span>
+      <span class="next-ann" id="nextAnn"></span>
+    </div>
+  </div>
+
+  <!-- Вкладки -->
+  <div class="tabs">
+    <div class="tab active" onclick="showTab('main')">Управление</div>
+    <div class="tab"        onclick="showTab('playlist')">Плейлист</div>
+    <div class="tab"        onclick="showTab('history')">История</div>
+  </div>
+
+  <!-- ══ Панель: Управление ══ -->
+  <div class="panel active" id="panel-main">
+
+    <div class="card">
+      <h2>ГРОМКОСТЬ</h2>
+      <div class="vol-row">
+        <span class="vol-label music">🎵 Музыка</span>
+        <input type="range" min="0" max="100" value="70" class="music" id="sldMusic"
+               oninput="onVol('music', this.value)">
+        <span class="vol-value music" id="valMusic">70%</span>
+      </div>
+      <div class="vol-row">
+        <span class="vol-label ann">📢 Объявления</span>
+        <input type="range" min="0" max="100" value="90" class="ann" id="sldAnn"
+               oninput="onVol('ann', this.value)">
+        <span class="vol-value ann" id="valAnn">90%</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>ЧАСТОТА ОБЪЯВЛЕНИЙ</h2>
+      <div class="vol-row">
+        <span class="vol-label ann">📢 Каждые</span>
+        <input type="range" min="1" max="20" value="3" class="ann" id="sldInterval"
+               oninput="onInterval(this.value)">
+        <span class="vol-value ann" id="valInterval">3 песни</span>
+      </div>
+      <div class="time-row">
+        <button class="save-btn" onclick="saveInterval()">Сохранить</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="controls">
+        <button class="btn" id="btnPause" onclick="cmdPause()">⏸ Пауза</button>
+        <button class="btn" onclick="cmdSkip()">⏭ Пропустить</button>
+      </div>
+    </div>
+
+    <div class="card info-bar" id="infoBar">—</div>
+
+    <!-- Расписание -->
+    <div class="card">
+      <h2>РАСПИСАНИЕ</h2>
+      <div class="schedule-status">
+        <span class="sched-badge off" id="schedBadge">ВЫКЛЮЧЕНО</span>
+        <span class="sched-next" id="schedNext"></span>
+      </div>
+      <div class="time-row">
+        <label>Включение</label>
+        <input type="time" id="schedStart" value="09:00">
+      </div>
+      <div class="time-row">
+        <label>Выключение</label>
+        <input type="time" id="schedEnd" value="22:00">
+      </div>
+      <div class="time-row">
+        <button class="save-btn" onclick="saveSchedule()">Сохранить</button>
+      </div>
+      <div class="sched-error" id="schedError"></div>
+    </div>
+
+  </div>
+
+  <!-- ══ Панель: Плейлист ══ -->
+  <div class="panel" id="panel-playlist">
+    <div class="card">
+      <h2>ОЧЕРЕДЬ ВОСПРОИЗВЕДЕНИЯ</h2>
+      <ul class="playlist" id="playlistEl"></ul>
+    </div>
+  </div>
+
+  <!-- ══ Панель: История ══ -->
+  <div class="panel" id="panel-history">
+    <div class="card">
+      <h2>ИСТОРИЯ ВОСПРОИЗВЕДЕНИЯ</h2>
+      <ul class="log-list" id="logList"></ul>
+    </div>
+  </div>
+
+</div>
+<script>
+  // ── Вкладки ──────────────────────────────────────────────────────
+  function showTab(id) {
+    document.querySelectorAll('.tab').forEach((t, i) => {
+      t.classList.toggle('active', ['main','playlist','history'][i] === id);
+    });
+    document.querySelectorAll('.panel').forEach(p => {
+      p.classList.toggle('active', p.id === 'panel-' + id);
+    });
+  }
+
+  // ── Защита слайдеров от перезаписи пока тащим ────────────────────
+  let draggingMusic = false, draggingAnn = false;
+  let intervalDirty = false;   // пользователь двигал ползунок, но ещё не сохранил
+
+  ['mousedown','touchstart'].forEach(e => {
+    document.getElementById('sldMusic').addEventListener(e, () => draggingMusic = true);
+    document.getElementById('sldAnn').addEventListener(e,   () => draggingAnn   = true);
+  });
+  ['mouseup','touchend'].forEach(e => {
+    document.getElementById('sldMusic').addEventListener(e, () => draggingMusic = false);
+    document.getElementById('sldAnn').addEventListener(e,   () => draggingAnn   = false);
+  });
+
+  // ── Обновление UI ─────────────────────────────────────────────────
+  let lastTrack = '';
+
+  async function fetchStatus() {
+    try {
+      const r = await fetch('/api/status');
+      const d = await r.json();
+      updateUI(d);
+    } catch(e) {}
+  }
+
+  function updateUI(d) {
+    // Тип / название
+    const badge = document.getElementById('typeBadge');
+    const name  = document.getElementById('trackName');
+    if (d.type === 'ann') {
+      badge.textContent = 'ОБЪЯВЛЕНИЕ';
+      badge.className   = 'type-badge type-ann';
+      name.style.color  = 'var(--ann)';
+    } else {
+      badge.textContent = 'МУЗЫКА';
+      badge.className   = 'type-badge type-music';
+      name.style.color  = 'var(--text)';
+    }
+    name.textContent = d.track || '—';
+
+    // Время
+    document.getElementById('elapsed').textContent  = d.elapsed;
+    const durEl = document.getElementById('duration');
+    durEl.textContent = d.duration ? '/ ' + d.duration : '';
+
+    // Следующее объявление
+    const nextEl = document.getElementById('nextAnn');
+    if (d.next_ann) {
+      nextEl.textContent = '• объявление ' + d.next_ann;
+      nextEl.className   = 'next-ann' + (d.next_ann === 'сейчас' ? ' now' : '');
+    } else {
+      nextEl.textContent = '';
+    }
+
+    // Пульс + кнопка паузы
+    const dot = document.getElementById('dot');
+    const btn = document.getElementById('btnPause');
+    if (d.fading) {
+      dot.className   = 'dot';
+      btn.textContent = '↓ Фейд...';
+      btn.className   = 'btn';
+      btn.disabled    = true;
+    } else if (d.paused) {
+      dot.className   = 'dot paused';
+      btn.textContent = '▶ Играть';
+      btn.className   = 'btn paused';
+      btn.disabled    = false;
+    } else {
+      dot.className   = 'dot';
+      btn.textContent = '⏸ Пауза';
+      btn.className   = 'btn';
+      btn.disabled    = false;
+    }
+
+    // Слайдеры
+    if (!draggingMusic)    setSlider('sldMusic', 'valMusic', d.music_vol);
+    if (!draggingAnn)      setSlider('sldAnn',   'valAnn',   d.ann_vol);
+    if (!intervalDirty && d.songs_between != null) {
+      const s = document.getElementById('sldInterval');
+      s.value = d.songs_between;
+      s.style.setProperty('--val', ((d.songs_between - 1) / 19 * 100) + '%');
+      document.getElementById('valInterval').textContent = intervalLabel(d.songs_between);
+    }
+
+    // Инфо
+    const info = document.getElementById('infoBar');
+    if (d.music_count === 0) {
+      info.textContent = '⚠ Нет файлов в папке music/';
+      info.className   = 'card info-bar warn';
+    } else {
+      info.textContent = `Музыка: ${d.music_count} файлов  •  Объявления: ${d.ann_count} файлов`;
+      info.className   = 'card info-bar';
+    }
+
+    // Расписание
+    if (d.schedule) updateScheduleUI(d.schedule);
+
+    // Плейлист (обновляем только если трек сменился)
+    if (d.track !== lastTrack) {
+      lastTrack = d.track;
+      updatePlaylist(d);
+    }
+
+    // Лог
+    const list = document.getElementById('logList');
+    list.innerHTML = d.log.map(e => {
+      const icons = {music:'🎵', ann:'📢', err:'⚠'};
+      return `<li class="log-item ${e.type}">
+        <span class="log-icon">${icons[e.type]||'•'}</span>
+        <span class="log-name">${esc(e.name)}</span>
+        <span class="log-time">${e.time}</span>
+      </li>`;
+    }).join('');
+  }
+
+  function updatePlaylist(d) {
+    const ul    = document.getElementById('playlistEl');
+    const items = d.queue || [];
+    const isPaused = d.paused;
+
+    // Строим HTML: сначала текущий трек, потом очередь
+    let html = '';
+
+    // Текущий трек
+    const barClass = isPaused ? 'playing-bar paused' : 'playing-bar';
+    html += `<li class="pl-item current ${d.type}">
+      <span class="pl-num">▶</span>
+      <div class="${barClass}"></div>
+      <span class="pl-name">${esc(d.track || '—')}</span>
+    </li>`;
+
+    // Очередь
+    items.forEach((item, i) => {
+      const icon = item.type === 'ann' ? '📢' : '🎵';
+      html += `<li class="pl-item ${item.type}">
+        <span class="pl-num">${i + 1}</span>
+        <span class="pl-icon">${icon}</span>
+        <span class="pl-name">${esc(item.name)}</span>
+      </li>`;
+    });
+
+    ul.innerHTML = html;
+  }
+
+  function setSlider(sliderId, valueId, val) {
+    const s = document.getElementById(sliderId);
+    const v = document.getElementById(valueId);
+    s.value = val;
+    s.style.setProperty('--val', val + '%');
+    v.textContent = val + '%';
+  }
+
+  function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  // ── Команды ──────────────────────────────────────────────────────
+  async function cmdPause() {
+    await fetch('/api/pause', {method:'POST'});
+    fetchStatus();
+  }
+  async function cmdSkip() {
+    await fetch('/api/skip', {method:'POST'});
+    // Обновляем плейлист сразу
+    lastTrack = '';
+    fetchStatus();
+  }
+
+  function intervalLabel(n) {
+    n = parseInt(n);
+    if (n === 20) return 'никогда';
+    if (n === 1)  return '1 песню';
+    if (n < 5)    return n + ' песни';
+    return n + ' песен';
+  }
+
+  function onInterval(value) {
+    intervalDirty = true;
+    const n = parseInt(value);
+    document.getElementById('sldInterval').style.setProperty('--val', ((n - 1) / 19 * 100) + '%');
+    document.getElementById('valInterval').textContent = intervalLabel(n);
+  }
+
+  async function saveInterval() {
+    const n = parseInt(document.getElementById('sldInterval').value);
+    await fetch('/api/interval', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({value: n})
+    });
+    intervalDirty = false;
+    lastTrack = '';  // сбрасываем, чтобы следующий fetchStatus обновил плейлист
+    fetchStatus();
+  }
+
+  let volTimers = {};
+  function onVol(type, value) {
+    const v  = parseInt(value);
+    const vi = type === 'music' ? 'valMusic' : 'valAnn';
+    const si = type === 'music' ? 'sldMusic' : 'sldAnn';
+    document.getElementById(vi).textContent = v + '%';
+    document.getElementById(si).style.setProperty('--val', v + '%');
+    clearTimeout(volTimers[type]);
+    volTimers[type] = setTimeout(() => {
+      fetch('/api/volume', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({type, value: v})
+      });
+    }, 80);
+  }
+
+  // ── Расписание ────────────────────────────────────────────────────
+  let schedInputFocused = false;
+  document.getElementById('schedStart').addEventListener('focus', () => schedInputFocused = true);
+  document.getElementById('schedEnd').addEventListener('focus',   () => schedInputFocused = true);
+  document.getElementById('schedStart').addEventListener('blur',  () => schedInputFocused = false);
+  document.getElementById('schedEnd').addEventListener('blur',    () => schedInputFocused = false);
+
+  function updateScheduleUI(s) {
+    const badge    = document.getElementById('schedBadge');
+    const next     = document.getElementById('schedNext');
+    const hdrSched = document.getElementById('headerSched');
+
+    if (s.active) {
+      badge.textContent = 'АКТИВНО';
+      badge.className   = 'sched-badge on';
+      hdrSched.textContent = 'РАБОТАЕТ';
+      hdrSched.className   = 'header-sched on';
+    } else {
+      badge.textContent = 'ВЫКЛЮЧЕНО';
+      badge.className   = 'sched-badge off';
+      hdrSched.textContent = 'ВЫКЛ';
+      hdrSched.className   = 'header-sched off';
+    }
+    next.textContent = `${s.next_event} в ${s.next_event_time} (${s.next_event_in})`;
+
+    // Не трогаем поля пока пользователь в них
+    if (!schedInputFocused) {
+      document.getElementById('schedStart').value = s.start;
+      document.getElementById('schedEnd').value   = s.end;
+    }
+  }
+
+  async function saveSchedule() {
+    const start = document.getElementById('schedStart').value;
+    const end   = document.getElementById('schedEnd').value;
+    const errEl = document.getElementById('schedError');
+    errEl.style.display = 'none';
+
+    try {
+      const r = await fetch('/api/schedule', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({start, end})
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        errEl.textContent   = d.error || 'Ошибка';
+        errEl.style.display = 'block';
+      } else {
+        updateScheduleUI(d);
+      }
+    } catch(e) {
+      errEl.textContent   = 'Ошибка соединения';
+      errEl.style.display = 'block';
+    }
+  }
+
+  // ── Старт ────────────────────────────────────────────────────────
+  fetchStatus();
+  setInterval(fetchStatus, 600);
+</script>
+</body>
+</html>

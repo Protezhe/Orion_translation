@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import queue as _queue
 import random
 import sys
 import threading
@@ -43,6 +44,8 @@ DEFAULTS: dict = {
     "announcements_volume": 90,
     "songs_between_announcements": 3,
     "working_hours": {"start": "09:00", "end": "22:00"},
+    "scheduled_announcements": [],
+    # Формат: [{"file": "promo.mp3", "times": ["10:00", "14:30"]}]
 }
 
 # ──────────────────────────────────────────────────────────────────
@@ -119,6 +122,9 @@ class RadioPlayer:
         self.is_fading:    bool = False
         self.log: list[dict]    = []
 
+        # Очередь плановых роликов (из Scheduler → в _loop)
+        self._sched_queue: _queue.Queue = _queue.Queue()
+
         # Флаги управления
         self._stop_ev  = threading.Event()
         self._skip_ev  = threading.Event()
@@ -127,7 +133,13 @@ class RadioPlayer:
 
     # ── Очередь ───────────────────────────────────────────────────
 
+    def _rescan(self):
+        """Пересканирует папки — подхватывает новые и удалённые файлы."""
+        self.music_files = scan_audio(BASE_DIR / self.config["music_dir"])
+        self.ann_files   = scan_audio(BASE_DIR / self.config["announcements_dir"])
+
     def _refill(self):
+        self._rescan()
         if not self.music_files:
             return
         batch = list(self.music_files)
@@ -247,7 +259,7 @@ class RadioPlayer:
     @ann_vol.setter
     def ann_vol(self, val: int):
         self._ann_vol = max(0, min(100, val))
-        if self.current_type == "ann":
+        if self.current_type in ("ann", "scheduled"):
             self._mp.audio_set_volume(self._ann_vol)
 
     # ── Позиция ───────────────────────────────────────────────────
@@ -265,6 +277,57 @@ class RadioPlayer:
             return ""
         sec = ms // 1000
         return f"{sec // 60}:{sec % 60:02d}"
+
+    def interrupt_with(self, path: Path):
+        """Поставить плановый ролик — будет сыгран как только закончится текущий фейд."""
+        self._sched_queue.put(path)
+
+    def _fade_out_sync(self, duration: float):
+        """Синхронный фейд (блокирует поток _loop). Восстанавливать громкость — вызывающий."""
+        start_vol = self._mp.audio_get_volume()
+        if start_vol <= 0:
+            return
+        steps = max(1, int(duration * 20))
+        delay = duration / steps
+        for i in range(steps, -1, -1):
+            if self._stop_ev.is_set():
+                return
+            self._mp.audio_set_volume(max(0, int(start_vol * i / steps)))
+            time.sleep(delay)
+
+    def _play_scheduled_now(self, path: Path):
+        """Воспроизводит плановый ролик синхронно внутри потока _loop."""
+        saved_name = self.current_name
+        saved_type = self.current_type
+        self.current_name = path.stem
+        self.current_type = "scheduled"
+
+        try:
+            media = self._vlc.media_new(str(path))
+            self._mp.set_media(media)
+            self._mp.play()
+            time.sleep(0.2)
+            self._mp.audio_set_volume(self._ann_vol)
+        except Exception as e:
+            self._add_log(f"ОШИБКА ролика {path.name}: {e}", "err")
+            self.current_name = saved_name
+            self.current_type = saved_type
+            return
+
+        self._add_log(path.stem, "scheduled")
+        time.sleep(0.15)
+
+        # Ждём окончания ролика
+        while True:
+            if self._stop_ev.is_set():
+                self._mp.stop()
+                break
+            if self._is_finished():
+                break
+            time.sleep(0.1)
+
+        self.current_name = saved_name
+        self.current_type = saved_type
 
     # ── Основной цикл ─────────────────────────────────────────────
 
@@ -320,6 +383,18 @@ class RadioPlayer:
                 if self._skip_ev.is_set():
                     self._mp.stop()
                     break
+                # Плановый ролик прерывает текущий трек
+                try:
+                    sched_path = self._sched_queue.get_nowait()
+                    self._fade_out_sync(3.0)
+                    self._mp.stop()
+                    self._play_scheduled_now(sched_path)
+                    # Восстанавливаем громкость для следующего трека
+                    vol = self._music_vol if ttype == "music" else self._ann_vol
+                    self._mp.audio_set_volume(vol)
+                    break
+                except _queue.Empty:
+                    pass
                 if not self.is_paused and self._is_finished():
                     break
                 time.sleep(0.1)
@@ -371,7 +446,8 @@ class RadioPlayer:
             "songs_between": self.songs_between,
             "log":           self.log[:20],
             "queue":         queue_preview,
-            "schedule":      schedule_info(self.config),
+            "schedule":         schedule_info(self.config),
+            "next_scheduled":   next_scheduled_info(self.config),
         }
 
 
@@ -425,30 +501,79 @@ def schedule_info(config: dict) -> dict:
     }
 
 
+def next_scheduled_info(config: dict) -> dict | None:
+    """Возвращает ближайший плановый ролик с учётом дней недели."""
+    now      = time.localtime()
+    now_mins = now.tm_hour * 60 + now.tm_min
+    now_dow  = now.tm_wday   # 0=Пн, 6=Вс
+
+    DOW_RU = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+
+    best_diff = float("inf")
+    best: dict | None = None
+
+    for ann in config.get("scheduled_announcements", []):
+        days = ann.get("days", [])
+        active_days = days if days else list(range(7))
+
+        for t in ann.get("times", []):
+            try:
+                t_mins = parse_hhmm(t)
+            except Exception:
+                continue
+            # Ищем ближайший подходящий день
+            for delta_day in range(7):
+                candidate_dow = (now_dow + delta_day) % 7
+                if candidate_dow not in active_days:
+                    continue
+                diff = t_mins - now_mins + delta_day * 24 * 60
+                if delta_day == 0 and diff <= 0:
+                    continue   # уже прошло сегодня
+                if diff < best_diff:
+                    best_diff = diff
+                    h, m = divmod(diff, 60)
+                    day_str = "сегодня" if delta_day == 0 else (
+                              "завтра"  if delta_day == 1 else DOW_RU[candidate_dow])
+                    in_str  = (f"через {h} ч {m} мин" if h and m else
+                               f"через {h} ч"         if h        else
+                               f"через {m} мин")
+                    best = {"file": ann["file"], "time": t,
+                            "day": day_str, "in": in_str}
+                break  # нашли ближайший день для этого времени
+
+    return best
+
+
 class Scheduler:
     """
-    Следит за расписанием: автоматически запускает и останавливает плеер.
-    Проверяет каждые 30 секунд.
+    Следит за расписанием: запускает/останавливает плеер по рабочим часам
+    и запускает плановые ролики в заданное время.
+    Проверяет каждые 10 секунд.
     """
 
     def __init__(self, player_ref: RadioPlayer, config_ref: dict):
-        self._player = player_ref
-        self._cfg    = config_ref
+        self._player     = player_ref
+        self._cfg        = config_ref
+        self._played_today: set[str] = set()
+        self._last_date: str         = ""
 
     def start(self):
         threading.Thread(target=self._loop, daemon=True, name="Scheduler").start()
 
     def _loop(self):
-        # Небольшая задержка при старте — плеер уже запущен или нет
         time.sleep(5)
+        tick = 0
         while True:
             try:
-                self._check()
+                self._check_scheduled_anns()
+                if tick % 3 == 0:          # каждые 30 сек
+                    self._check_working_hours()
+                tick += 1
             except Exception as e:
                 print(f"[Расписание] Ошибка: {e}")
-            time.sleep(30)
+            time.sleep(10)
 
-    def _check(self):
+    def _check_working_hours(self):
         info = schedule_info(self._cfg)
         if info["active"] and not self._player.is_playing:
             print(f"[Расписание] {time.strftime('%H:%M')} — рабочее время, запускаю плеер")
@@ -456,6 +581,40 @@ class Scheduler:
         elif not info["active"] and self._player.is_playing:
             print(f"[Расписание] {time.strftime('%H:%M')} — конец рабочего времени, останавливаю")
             self._player.stop()
+
+    def _check_scheduled_anns(self):
+        today    = time.strftime("%Y-%m-%d")
+        now_str  = time.strftime("%H:%M")
+        today_dow = time.localtime().tm_wday   # 0=Пн, 6=Вс
+        ann_dir  = BASE_DIR / self._cfg.get("announcements_dir", "announcements")
+
+        # Сброс в новый день
+        if self._last_date != today:
+            self._played_today.clear()
+            self._last_date = today
+
+        if not self._player.is_playing or self._player.is_paused:
+            return
+
+        for ann in self._cfg.get("scheduled_announcements", []):
+            fname    = ann.get("file", "").strip()
+            filepath = ann_dir / fname
+            if not filepath.exists():
+                continue
+            # Проверяем день недели (пустой список = каждый день)
+            days = ann.get("days", [])
+            if days and today_dow not in days:
+                continue
+            for t in ann.get("times", []):
+                key = f"{fname}_{today}_{t}"
+                if t == now_str and key not in self._played_today:
+                    self._played_today.add(key)
+                    self._player.interrupt_with(filepath)
+                    print(f"[Расписание] {now_str} — плановый ролик: {fname}")
+
+    def _check(self):
+        """Совместимость — немедленная проверка рабочих часов."""
+        self._check_working_hours()
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -518,19 +677,36 @@ def api_schedule_set():
     return jsonify(schedule_info(cfg))
 
 
-@app.route("/api/interval", methods=["POST"])
-def api_interval():
-    data  = request.get_json(force=True)
-    value = max(1, min(20, int(data.get("value", 3))))
-    cfg["songs_between_announcements"] = value
-    player.songs_between = value
-    # Сбрасываем очередь и сразу перегенерируем с новым интервалом
-    with player._lock:
-        player._queue.clear()
-        player._song_counter = 0
-        player._refill()
+@app.route("/api/scheduled", methods=["GET"])
+def api_scheduled_get():
+    ann_dir   = BASE_DIR / cfg.get("announcements_dir", "announcements")
+    available = [f.name for f in scan_audio(ann_dir)]
+    return jsonify({
+        "announcements":   cfg.get("scheduled_announcements", []),
+        "available_files": available,
+        "next":            next_scheduled_info(cfg),
+    })
+
+
+@app.route("/api/scheduled", methods=["POST"])
+def api_scheduled_set():
+    data = request.get_json(force=True)
+    import re
+    time_re = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+    validated = []
+    for ann in data.get("announcements", []):
+        fname = str(ann.get("file", "")).strip()
+        if not fname:
+            continue
+        times = sorted({t for t in ann.get("times", []) if time_re.match(str(t))})
+        days  = sorted({int(d) for d in ann.get("days", []) if str(d).isdigit() and 0 <= int(d) <= 6})
+        validated.append({"file": fname, "times": times, "days": days})
+
+    cfg["scheduled_announcements"] = validated
     save_config(cfg)
-    return jsonify({"ok": True, "value": value})
+    return jsonify({"ok": True, "next": next_scheduled_info(cfg)})
+
 
 
 @app.route("/api/volume", methods=["POST"])

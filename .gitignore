@@ -3,3 +3,4 @@ music/
 announcements/
 __pycache__/
 .DS_Store
+offline_packages

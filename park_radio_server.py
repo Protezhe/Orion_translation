@@ -790,10 +790,12 @@ def api_upload():
     if not file or not file.filename:
         return jsonify({"error": "Файл не выбран"}), 400
 
-    # Безопасное имя файла
-    from werkzeug.utils import secure_filename
-    fname = secure_filename(file.filename)
-    if not fname:
+    # Безопасное имя файла (поддержка кириллицы)
+    import re as _re
+    raw = file.filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]  # убираем путь
+    raw = raw.strip().replace(" ", "_")
+    fname = _re.sub(r'[<>:"/\\|?*\x00-\x1f]', '', raw)        # убираем опасные символы
+    if not fname or fname.startswith("."):
         return jsonify({"error": "Недопустимое имя файла"}), 400
 
     ext = os.path.splitext(fname)[1].lower()

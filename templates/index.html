@@ -954,6 +954,7 @@
   function onFileChosen(folder) {
     const input = document.getElementById('upload' + suffix(folder) + 'Input');
     setChosen(folder, input.files);
+    doUpload(folder);
   }
 
   function onDragOver(e, folder) {
@@ -967,7 +968,7 @@
     e.preventDefault();
     document.getElementById(dropId(folder)).classList.remove('dragover');
     const files = [...e.dataTransfer.files].filter(f => /\.(mp3|wav|ogg|flac|aac|m4a|wma)$/i.test(f.name));
-    if (files.length) setChosen(folder, files);
+    if (files.length) { setChosen(folder, files); doUpload(folder); }
   }
 
   async function doUpload(folder) {

@@ -1,0 +1,1 @@
+pip install --no-index --find-links=./offline_packages flask python-vlc

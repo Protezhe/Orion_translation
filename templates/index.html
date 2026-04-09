@@ -778,7 +778,7 @@
   }
 
   // ── Роликовое расписание ─────────────────────────────────────────
-  // schedMap: { filename -> { times: Set<string>, days: Set<int 0-6> } }
+  // schedMap: { filename -> { times, days, enabled, date_from, date_to } }
   // days 0=Пн … 6=Вс; пустое множество = каждый день
   const DOW = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
   let schedMap = {};
@@ -790,15 +790,17 @@
       const r = await fetch('/api/scheduled');
       const d = await r.json();
       const newFiles = d.available_files || [];
-      newFiles.forEach(f => { if (!schedMap[f]) schedMap[f] = {times: new Set(), days: new Set(), enabled: true}; });
+      newFiles.forEach(f => { if (!schedMap[f]) schedMap[f] = {times: new Set(), days: new Set(), enabled: true, date_from: '', date_to: ''}; });
       Object.keys(schedMap).forEach(f => { if (!newFiles.includes(f)) delete schedMap[f]; });
       availableFiles = newFiles;
       if (!schedDirty) {
         (d.announcements || []).forEach(a => {
           if (schedMap[a.file]) {
-            schedMap[a.file].times   = new Set(a.times || []);
-            schedMap[a.file].days    = new Set((a.days || []).map(Number));
-            schedMap[a.file].enabled = a.enabled !== false;
+            schedMap[a.file].times     = new Set(a.times || []);
+            schedMap[a.file].days      = new Set((a.days || []).map(Number));
+            schedMap[a.file].enabled   = a.enabled !== false;
+            schedMap[a.file].date_from = a.date_from || '';
+            schedMap[a.file].date_to   = a.date_to || '';
           }
         });
       }
@@ -821,12 +823,22 @@
         `<button class="day-btn ${entry.days.has(i) ? 'on' : ''}" onclick="toggleDay('${fname}',${i})">${label}</button>`
       ).join('');
       const isOn = entry.enabled !== false;
+      const df = entry.date_from || '';
+      const dt = entry.date_to || '';
       return `<div class="ann-file">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
           <div class="ann-filename" style="margin-bottom:0;flex:1">📣 ${esc(fname)}</div>
           <button class="toggle-btn ${isOn ? 'on' : 'off'}" onclick="toggleEnabled('${fname}')">
             ${isOn ? 'ВКЛ' : 'ВЫКЛ'}
           </button>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;font-size:12px">
+          <span style="color:var(--dim)">с</span>
+          <input type="date" value="${df}" onchange="setDateRange('${fname}','from',this.value)"
+            style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:2px 6px;font-size:12px">
+          <span style="color:var(--dim)">по</span>
+          <input type="date" value="${dt}" onchange="setDateRange('${fname}','to',this.value)"
+            style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:2px 6px;font-size:12px">
         </div>
         <div class="days-row">${dayBtns}</div>
         <div class="time-chips" id="chips_${CSS.escape(fname)}">
@@ -851,6 +863,13 @@
     if (e.days.has(dow)) e.days.delete(dow); else e.days.add(dow);
     schedDirty = true;
     renderScheduled();
+  }
+
+  function setDateRange(fname, which, val) {
+    if (!schedMap[fname]) return;
+    if (which === 'from') schedMap[fname].date_from = val;
+    else schedMap[fname].date_to = val;
+    schedDirty = true;
   }
 
   function removeTime(fname, t) {
@@ -885,8 +904,11 @@
   async function saveScheduled() {
     const announcements = availableFiles
       .map(f => {
-        const e = schedMap[f] || {times: new Set(), days: new Set(), enabled: true};
-        return {file: f, times: [...e.times].sort(), days: [...e.days].sort(), enabled: e.enabled !== false};
+        const e = schedMap[f] || {times: new Set(), days: new Set(), enabled: true, date_from: '', date_to: ''};
+        const obj = {file: f, times: [...e.times].sort(), days: [...e.days].sort(), enabled: e.enabled !== false};
+        if (e.date_from) obj.date_from = e.date_from;
+        if (e.date_to) obj.date_to = e.date_to;
+        return obj;
       })
       .filter(a => a.times.length > 0);
 

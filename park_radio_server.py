@@ -241,6 +241,8 @@ class RadioPlayer:
         self._stop_ev.set()
         self._pause_ev.set()
         self._mp.stop()
+        self.is_playing = False
+        self.is_paused = False
 
     # ── Громкость ─────────────────────────────────────────────────
 
@@ -514,9 +516,16 @@ def next_scheduled_info(config: dict) -> dict | None:
     best_diff = float("inf")
     best: dict | None = None
 
+    import datetime as _dt
+    today_date = _dt.date.today()
+
     for ann in config.get("scheduled_announcements", []):
+        if not ann.get("enabled", True):
+            continue
         days = ann.get("days", [])
         active_days = days if days else list(range(7))
+        date_from = ann.get("date_from", "")
+        date_to   = ann.get("date_to", "")
 
         for t in ann.get("times", []):
             try:
@@ -527,6 +536,12 @@ def next_scheduled_info(config: dict) -> dict | None:
             for delta_day in range(7):
                 candidate_dow = (now_dow + delta_day) % 7
                 if candidate_dow not in active_days:
+                    continue
+                candidate_date = today_date + _dt.timedelta(days=delta_day)
+                candidate_str  = candidate_date.isoformat()
+                if date_from and candidate_str < date_from:
+                    continue
+                if date_to and candidate_str > date_to:
                     continue
                 diff = t_mins - now_mins + delta_day * 24 * 60
                 if delta_day == 0 and diff <= 0:
@@ -605,6 +620,13 @@ class Scheduler:
                 continue
             # Пропускаем выключенные объявления
             if not ann.get("enabled", True):
+                continue
+            # Проверяем диапазон дат (пустое = без ограничения)
+            date_from = ann.get("date_from", "")
+            date_to   = ann.get("date_to", "")
+            if date_from and today < date_from:
+                continue
+            if date_to and today > date_to:
                 continue
             # Проверяем день недели (пустой список = каждый день)
             days = ann.get("days", [])
@@ -732,6 +754,8 @@ def api_scheduled_set():
     import re
     time_re = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
+    date_re = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
     validated = []
     for ann in data.get("announcements", []):
         fname = str(ann.get("file", "")).strip()
@@ -740,7 +764,18 @@ def api_scheduled_set():
         times   = sorted({t for t in ann.get("times", []) if time_re.match(str(t))})
         days    = sorted({int(d) for d in ann.get("days", []) if str(d).isdigit() and 0 <= int(d) <= 6})
         enabled = bool(ann.get("enabled", True))
-        validated.append({"file": fname, "times": times, "days": days, "enabled": enabled})
+        date_from = str(ann.get("date_from", "")).strip()
+        date_to   = str(ann.get("date_to", "")).strip()
+        if not date_re.match(date_from):
+            date_from = ""
+        if not date_re.match(date_to):
+            date_to = ""
+        entry = {"file": fname, "times": times, "days": days, "enabled": enabled}
+        if date_from:
+            entry["date_from"] = date_from
+        if date_to:
+            entry["date_to"] = date_to
+        validated.append(entry)
 
     cfg["scheduled_announcements"] = validated
     save_config(cfg)
